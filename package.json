@@ -1,0 +1,21 @@
+{
+  "name": "piwab",
+  "version": "0.1.0",
+  "description": "Pi Web Agent Bridge — control pi from a browser",
+  "type": "module",
+  "bin": {
+    "piwab": "./bridge/index.ts"
+  },
+  "scripts": {
+    "dev": "npx tsx bridge/index.ts",
+    "start": "npx tsx bridge/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

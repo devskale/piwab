@@ -1,0 +1,11 @@
+node_modules/
+pi-mono
+pi-mono/
+dist/
+*.js.map
+.DS_Store
+.env
+.env.*
+.pi/
+pnpm-lock.yaml
+pnpm-workspace.yaml

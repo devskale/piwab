@@ -1,0 +1,164 @@
+/**
+ * PiWAB Bridge — Spawns `pi --mode rpc` and exposes it over WebSocket.
+ *
+ * Usage: npx tsx bridge/index.ts [--port 3210] [--cwd /path/to/project]
+ */
+
+import { spawn, type ChildProcess } from "child_process";
+import { WebSocketServer, WebSocket } from "ws";
+import { createServer } from "http";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join, resolve } from "path";
+
+// ---------------------------------------------------------------------------
+// CLI args
+// ---------------------------------------------------------------------------
+const args = process.argv.slice(2);
+let port = 3210;
+let cwd: string | undefined;
+
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--port" && args[i + 1]) port = parseInt(args[++i], 10);
+  if (args[i] === "--cwd" && args[i + 1]) cwd = resolve(args[++i]);
+}
+
+// ---------------------------------------------------------------------------
+// Serve the single-file web client
+// ---------------------------------------------------------------------------
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const htmlPath = join(__dirname, "..", "web", "index.html");
+let indexHtml: string;
+try {
+  indexHtml = readFileSync(htmlPath, "utf-8");
+} catch {
+  console.error(`❌  web/index.html not found at ${htmlPath}`);
+  process.exit(1);
+}
+
+const httpServer = createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(indexHtml);
+});
+
+// ---------------------------------------------------------------------------
+// JSONL reader — splits on \n only (pi RPC requirement)
+// ---------------------------------------------------------------------------
+function attachJsonlReader(
+  stream: NodeJS.ReadableStream,
+  onLine: (line: string) => void,
+) {
+  let buffer = "";
+
+  stream.on("data", (chunk: Buffer | string) => {
+    buffer += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+    while (true) {
+      const idx = buffer.indexOf("\n");
+      if (idx === -1) break;
+      let line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.length > 0) onLine(line);
+    }
+  });
+
+  stream.on("end", () => {
+    if (buffer.length > 0) onLine(buffer);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Spawn pi in RPC mode
+// ---------------------------------------------------------------------------
+function spawnPi(): ChildProcess {
+  const piArgs = ["--mode", "rpc"];
+  const piCmd = "pi";
+
+  const child = spawn(piCmd, piArgs, {
+    cwd: cwd || process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env },
+  });
+
+  child.stderr?.on("data", (chunk: Buffer) => {
+    const msg = chunk.toString("utf-8").trim();
+    if (msg) console.log(`[pi:stderr] ${msg}`);
+  });
+
+  child.on("exit", (code, signal) => {
+    console.log(`[pi] exited (code=${code}, signal=${signal})`);
+  });
+
+  return child;
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+const wss = new WebSocketServer({ server: httpServer });
+
+let pi: ChildProcess | null = null;
+let client: WebSocket | null = null;
+
+function connectPi() {
+  if (pi) {
+    pi.kill();
+    pi = null;
+  }
+
+  pi = spawnPi();
+  console.log(`[bridge] pi spawned (pid=${pi.pid})`);
+
+  // pi stdout → WebSocket client
+  attachJsonlReader(pi.stdout!, (line) => {
+    if (client?.readyState === WebSocket.OPEN) {
+      client.send(line);
+    }
+  });
+}
+
+// On browser connect
+wss.on("connection", (ws) => {
+  if (client) {
+    console.log("[bridge] replacing existing client");
+    client.close();
+  }
+  client = ws;
+  console.log("[bridge] client connected");
+
+  // Ensure pi is running
+  if (!pi || pi.exitCode !== null) {
+    connectPi();
+  }
+
+  // Send current state so UI can hydrate
+  pi!.stdin!.write(JSON.stringify({ type: "get_state" }) + "\n");
+
+  // Browser → pi stdin
+  ws.on("message", (data) => {
+    if (pi?.stdin?.writable) {
+      pi.stdin.write(data.toString() + "\n");
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("[bridge] client disconnected");
+    client = null;
+  });
+
+  ws.on("error", (err) => {
+    console.error(`[bridge] ws error: ${err.message}`);
+  });
+});
+
+// Graceful shutdown
+process.on("SIGINT", () => {
+  console.log("\n[bridge] shutting down...");
+  if (pi) pi.kill();
+  httpServer.close();
+  process.exit(0);
+});
+
+httpServer.listen(port, () => {
+  console.log(`\n🔗  PiWAB running at http://localhost:${port}\n`);
+});

@@ -318,6 +318,9 @@ const builtInCommands = [
   { name: "/compact", desc: "Compact conversation context", action: doCompact },
   { name: "/steer", desc: "Send steering message while agent runs", action: () => { /* handled inline */ } },
   { name: "/followup", desc: "Queue a follow-up message", action: () => { /* handled inline */ } },
+  { name: "/fork", desc: "Fork from a previous message", action: doFork },
+  { name: "/name", desc: "Set session name", action: doSessionName },
+  { name: "/sessions", desc: "List fork points", action: doListForkMessages },
   { name: "/new", desc: "New session", action: newSession, shortcut: "↻" },
   { name: "/export", desc: "Export session to HTML", action: doExport },
   { name: "/stats", desc: "Show session statistics", action: doStats },
@@ -481,7 +484,42 @@ function showModelPalette() {
   inputEl.value = "";
   inputEl.focus();
 
-  // Wire click handlers
+  cmdPalette.querySelectorAll(".cmd-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.idx);
+      cmdPaletteItems[idx]?.action();
+    });
+  });
+}
+
+function showForkPalette(messages) {
+  closeCmdPalette();
+  const items = messages.map(m => ({
+    name: m.text.length > 60 ? m.text.slice(0, 57) + "…" : m.text,
+    desc: m.entryId,
+    action: () => {
+      sendRpc({ type: "fork", entryId: m.entryId });
+      closeCmdPalette();
+    },
+  }));
+
+  cmdPaletteItems = items;
+  cmdPaletteSelectedIdx = 0;
+
+  const html = `<div class="cmd-group-label">Fork from message</div>` +
+    items.map((m, i) =>
+      `<div class="cmd-item${i === 0 ? " selected" : ""}" data-idx="${i}">
+        <span class="cmd-name">${escapeHtml(m.name)}</span>
+        <span class="cmd-desc">${escapeHtml(m.desc)}</span>
+      </div>`
+    ).join("");
+
+  cmdPalette.innerHTML = html;
+  cmdPalette.classList.add("open");
+  cmdPaletteOpen = true;
+  inputEl.value = "";
+  inputEl.focus();
+
   cmdPalette.querySelectorAll(".cmd-item").forEach(el => {
     el.addEventListener("click", () => {
       const idx = parseInt(el.dataset.idx);
@@ -515,6 +553,26 @@ function doExport() {
 function doStats() {
   closeCmdPalette();
   sendRpc({ type: "get_session_stats" });
+}
+
+function doFork() {
+  closeCmdPalette();
+  sendRpc({ type: "get_fork_messages" });
+  showNotification("Loading fork points…");
+}
+
+function doSessionName() {
+  closeCmdPalette();
+  const name = prompt("Session name:");
+  if (name) {
+    sendRpc({ type: "set_session_name", name });
+    showNotification(`Session: ${name}`);
+  }
+}
+
+function doListForkMessages() {
+  closeCmdPalette();
+  sendRpc({ type: "get_fork_messages" });
 }
 
 // ── Notification ──
@@ -1111,6 +1169,44 @@ function handleResponse(event) {
         // follow-up queued
       } else {
         showNotification(`Follow-up failed: ${event.error || "unknown"}`, 4000);
+      }
+      break;
+
+    case "set_session_name":
+      if (event.success) showNotification("Session renamed");
+      break;
+
+    case "switch_session":
+      if (data?.cancelled) {
+        showNotification("Session switch cancelled by extension");
+      } else {
+        showNotification("Switched session");
+        messagesEl.innerHTML = "";
+        sendRpc({ type: "get_state" });
+      }
+      break;
+
+    case "new_session":
+      if (data?.cancelled) {
+        showNotification("New session cancelled by extension");
+      }
+      break;
+
+    case "fork":
+      if (data?.cancelled) {
+        showNotification("Fork cancelled by extension");
+      } else if (data?.text) {
+        showNotification(`Forked from: ${data.text.slice(0, 50)}…`);
+        messagesEl.innerHTML = "";
+        sendRpc({ type: "get_state" });
+      }
+      break;
+
+    case "get_fork_messages":
+      if (data?.messages?.length) {
+        showForkPalette(data.messages);
+      } else {
+        showNotification("No fork points available");
       }
       break;
   }

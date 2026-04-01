@@ -136,6 +136,12 @@ function spawnPi(): ChildProcess {
 // Main
 // ---------------------------------------------------------------------------
 const wss = new WebSocketServer({ server: httpServer });
+wss.on("error", (err: any) => {
+  if ((err as any).code === "EADDRINUSE") {
+    console.error(`\n❌  Port ${port} is already in use. Kill it with: lsof -ti :${port} | xargs kill -9\n`);
+    process.exit(1);
+  }
+});
 
 let pi: ChildProcess | null = null;
 let client: WebSocket | null = null;
@@ -195,8 +201,18 @@ wss.on("connection", (ws) => {
 process.on("SIGINT", () => {
   console.log("\n[bridge] shutting down...");
   if (pi) pi.kill();
+  if (client) client.close();
+  wss.close();
   httpServer.close();
   process.exit(0);
+});
+
+httpServer.on("error", (err: any) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n❌  Port ${port} is already in use. Kill it with: lsof -ti :${port} | xargs kill -9\n`);
+    process.exit(1);
+  }
+  throw err;
 });
 
 httpServer.listen(port, () => {

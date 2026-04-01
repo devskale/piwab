@@ -86,17 +86,17 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
   border-radius: 4px; overflow: hidden; font-size: 11px;
 }
 .tool-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; gap: 6px;
   padding: 3px 8px; cursor: pointer; user-select: none;
 }
 .tool-header:hover { background: rgba(255,255,255,0.03); }
 .tool-name { font-family: var(--mono); color: var(--accent); font-weight: 500; font-size: 11px; }
+.tool-args-inline { font-family: var(--mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-status { font-size: 10px; color: var(--text-dim); }
 .tool-status.running { color: var(--accent); }
 .tool-status.error { color: var(--error); }
 .tool-toggle { color: var(--text-dim); font-size: 9px; transition: transform 0.2s; }
 .tool-toggle.open { transform: rotate(90deg); }
-.tool-args { display: none; }
 .tool-body {
   border-top: 1px solid var(--tool-border);
   padding: 4px 8px; font-family: var(--mono); font-size: 11px;
@@ -108,15 +108,15 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
 
 /* ── Thinking ── */
 .msg-thinking {
-  padding: 2px 8px; font-size: 11px; color: var(--text-dim);
-  font-style: italic; border-left: 2px solid var(--border); margin: 2px 0;
-  cursor: pointer; user-select: none;
+  padding: 4px 10px; font-size: 11px; color: #999;
+  border-left: 2px solid var(--border); margin: 2px 0;
+  cursor: pointer; user-select: none; line-height: 1.5;
 }
 .msg-thinking:hover { color: var(--text); }
 .thinking-content {
-  max-height: 0; overflow: hidden; transition: max-height 0.3s;
+  max-height: 600px; overflow-y: auto; transition: max-height 0.3s;
 }
-.thinking-content.open { max-height: 300px; }
+.thinking-content:not(.open) { max-height: 0; overflow: hidden; }
 
 /* ── Error ── */
 .msg-error-text {
@@ -949,16 +949,14 @@ function addToolCard(id, name, args) {
 
   const header = document.createElement("div");
   header.className = "tool-header";
+  const argsStr = formatArgs(name, args);
   header.innerHTML = `
     <span class="tool-name">${escapeHtml(name)}</span>
-    <span style="display:flex;align-items:center;gap:8px;">
+    <span class="tool-args-inline">${escapeHtml(argsStr)}</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
       <span class="tool-status running" id="tool-status-${id}">running…</span>
       <span class="tool-toggle" id="tool-toggle-${id}">▶</span>
     </span>`;
-
-  const argsEl = document.createElement("div");
-  argsEl.className = "tool-args";
-  argsEl.textContent = formatArgs(name, args);
 
   const body = document.createElement("div");
   body.className = "tool-body";
@@ -970,7 +968,6 @@ function addToolCard(id, name, args) {
   };
 
   card.appendChild(header);
-  card.appendChild(argsEl);
   card.appendChild(body);
   div.appendChild(card);
   messagesEl.appendChild(div);
@@ -1020,7 +1017,7 @@ function startThinking() {
   if (!currentAssistantEl) startAssistantMessage();
   const thinkDiv = document.createElement("div");
   thinkDiv.className = "msg-thinking";
-  thinkDiv.innerHTML = `<span>💭 thinking…</span><div class="thinking-content"></div>`;
+  thinkDiv.innerHTML = `<span>💭 thinking…</span><div class="thinking-content open"></div>`;
   thinkDiv.onclick = () => thinkDiv.querySelector(".thinking-content")?.classList.toggle("open");
   currentAssistantEl.parentElement.insertBefore(thinkDiv, currentAssistantEl);
   currentThinkingEl = thinkDiv.querySelector(".thinking-content");

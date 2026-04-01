@@ -205,6 +205,12 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
   background: white; transition: transform 0.2s;
 }
 .setting-row input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.setting-select {
+  padding: 4px 8px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; font-size: 13px;
+  cursor: pointer; outline: none;
+}
+.setting-select:focus { border-color: var(--accent); }
 
 /* ── Input ── */
 #input-area {
@@ -615,31 +621,46 @@ function openSettings() {
     return `<label class="setting-row">
       <span class="setting-label">${escapeHtml(label)}</span>
       <input type="checkbox" id="${id}" ${checked ? "checked" : ""} />
-      <span class="setting-toggle"></span>
     </label>`;
   }
+
+  function selectHtml(id, label, options, value) {
+    const opts = options.map(o => `<option value="${o.value}" ${value === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+    return `<label class="setting-row">
+      <span class="setting-label">${escapeHtml(label)}</span>
+      <select id="${id}" class="setting-select">${opts}</select>
+    </label>`;
+  }
+
+  const thinkingOptions = [
+    { value: "off", label: "Off" },
+    { value: "minimal", label: "Minimal" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
+
+  const modeOptions = [
+    { value: "one-at-a-time", label: "One at a time" },
+    { value: "all", label: "All" },
+  ];
+
+  const themeOptions = [
+    { value: "dark", label: "Dark" },
+    { value: "light", label: "Light" },
+  ];
 
   const overlay = showModal(`
     <h3>⚙ Settings</h3>
     <div class="settings-list">
+      ${selectHtml("setting-thinking-level", "Thinking level", thinkingOptions, currentThinkingLevel || settings.thinkingLevel)}
+      ${selectHtml("setting-steer-mode", "Steering mode", modeOptions, settings.steeringMode)}
+      ${selectHtml("setting-followup-mode", "Follow-up mode", modeOptions, settings.followUpMode)}
       ${toggleHtml("setting-auto-compact", "Auto-compact", settings.autoCompaction)}
-      ${toggleHtml("setting-show-images", "Show images", settings.showImages)}
-      ${toggleHtml("setting-auto-resize-images", "Auto-resize images", settings.autoResizeImages)}
-      ${toggleHtml("setting-block-images", "Block images", settings.blockImages)}
-      ${toggleHtml("setting-skill-commands", "Skill commands", settings.skillCommands)}
-      <label class="setting-row">
-        <span class="setting-label">Autocomplete max items</span>
-        <input type="number" id="setting-autocomplete-max" value="${settings.autocompleteMaxItems}" min="1" max="50"
-          style="width:60px;padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;text-align:right;" />
-      </label>
-      <label class="setting-row">
-        <span class="setting-label">Steering mode</span>
-        <select id="setting-steer-mode"
-          style="padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;">
-          <option value="one-at-a-time" ${settings.steeringMode === "one-at-a-time" ? "selected" : ""}>One at a time</option>
-          <option value="all" ${settings.steeringMode === "all" ? "selected" : ""}>All</option>
-        </select>
-      </label>
+      ${toggleHtml("setting-hide-thinking", "Hide thinking", settings.hideThinking)}
+      ${toggleHtml("setting-collapse-changelog", "Collapse changelog", settings.collapseChangelog)}
+      ${toggleHtml("setting-quiet-startup", "Quiet startup", settings.quietStartup)}
+      ${selectHtml("setting-theme", "Theme", themeOptions, settings.theme)}
     </div>
     <div class="modal-actions">
       <button class="cancel" data-cancel="true">Cancel</button>
@@ -649,21 +670,30 @@ function openSettings() {
 
   overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); };
   overlay.querySelector("[data-confirm]").onclick = () => {
+    const thinkingLevel = document.getElementById("setting-thinking-level").value;
+    const steerMode = document.getElementById("setting-steer-mode").value;
+    const followupMode = document.getElementById("setting-followup-mode").value;
+
     settings.autoCompaction = document.getElementById("setting-auto-compact").checked;
-    settings.showImages = document.getElementById("setting-show-images").checked;
-    settings.autoResizeImages = document.getElementById("setting-auto-resize-images").checked;
-    settings.blockImages = document.getElementById("setting-block-images").checked;
-    settings.skillCommands = document.getElementById("setting-skill-commands").checked;
-    settings.autocompleteMaxItems = parseInt(document.getElementById("setting-autocomplete-max").value) || 5;
-    settings.steeringMode = document.getElementById("setting-steer-mode").value;
+    settings.steeringMode = steerMode;
+    settings.followUpMode = followupMode;
+    settings.thinkingLevel = thinkingLevel;
+    settings.hideThinking = document.getElementById("setting-hide-thinking").checked;
+    settings.collapseChangelog = document.getElementById("setting-collapse-changelog").checked;
+    settings.quietStartup = document.getElementById("setting-quiet-startup").checked;
+    settings.theme = document.getElementById("setting-theme").value;
 
-    // Send RPC commands for server-side settings
+    // Send RPC commands
     sendRpc({ type: "set_auto_compaction", enabled: settings.autoCompaction });
-    sendRpc({ type: "set_steering_mode", mode: settings.steeringMode });
+    sendRpc({ type: "set_steering_mode", mode: steerMode });
+    sendRpc({ type: "set_follow_up_mode", mode: followupMode });
+    if (thinkingLevel !== currentThinkingLevel) {
+      sendRpc({ type: "set_thinking_level", level: thinkingLevel });
+      currentThinkingLevel = thinkingLevel;
+      updateFooterThinking();
+    }
 
-    // Persist local settings
     saveSettings();
-
     closeModal();
     showNotification("Settings saved");
   };
@@ -1025,12 +1055,13 @@ function defaultSettings() {
     // Server-side (RPC)
     autoCompaction: true,
     steeringMode: "one-at-a-time",
+    followUpMode: "one-at-a-time",
+    thinkingLevel: "low",
     // Local (localStorage)
-    showImages: false,
-    autoResizeImages: true,
-    blockImages: false,
-    skillCommands: true,
-    autocompleteMaxItems: 5,
+    hideThinking: false,
+    collapseChangelog: false,
+    quietStartup: false,
+    theme: "dark",
   };
 }
 
@@ -1219,6 +1250,7 @@ function handleResponse(event) {
       }
       if (data?.autoCompactionEnabled !== undefined) settings.autoCompaction = data.autoCompactionEnabled;
       if (data?.steeringMode) settings.steeringMode = data.steeringMode;
+      if (data?.followUpMode) settings.followUpMode = data.followUpMode;
       break;
 
     case "get_available_models":

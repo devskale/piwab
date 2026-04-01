@@ -6,6 +6,5 @@ dist/
 .DS_Store
 .env
 .env.*
-.pi/
 pnpm-lock.yaml
 pnpm-workspace.yaml

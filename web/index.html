@@ -184,6 +184,28 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
 .modal-actions .cancel { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
 .modal-actions .cancel:hover { background: var(--border); }
 
+/* ── Settings list ── */
+.settings-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; }
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0; font-size: 13px; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-label { color: var(--text); }
+.setting-row input[type="checkbox"] {
+  appearance: none; width: 36px; height: 20px;
+  background: var(--border); border-radius: 10px;
+  position: relative; cursor: pointer; transition: background 0.2s;
+}
+.setting-row input[type="checkbox"]:checked { background: var(--accent); }
+.setting-row input[type="checkbox"]::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: white; transition: transform 0.2s;
+}
+.setting-row input[type="checkbox"]:checked::after { transform: translateX(16px); }
+
 /* ── Input ── */
 #input-area {
   flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--border);
@@ -264,6 +286,7 @@ button.secondary:hover { background: var(--border); }
   <div id="controls">
     <button class="secondary" id="btn-abort" disabled onclick="abort()">⏹ Abort</button>
     <button class="secondary" id="btn-new" onclick="newSession()">↻ New</button>
+    <button class="secondary" id="btn-settings" onclick="openSettings()">⚙ Settings</button>
   </div>
   <div id="input-area" style="position:relative;">
     <div id="cmd-palette"></div>
@@ -322,6 +345,7 @@ const builtInCommands = [
   { name: "/name", desc: "Set session name", action: doSessionName },
   { name: "/sessions", desc: "List fork points", action: doListForkMessages },
   { name: "/bash", desc: "Run a bash command directly", action: () => { /* handled inline */ } },
+  { name: "/settings", desc: "Open settings panel", action: openSettings },
   { name: "/new", desc: "New session", action: newSession, shortcut: "↻" },
   { name: "/export", desc: "Export session to HTML", action: doExport },
   { name: "/stats", desc: "Show session statistics", action: doStats },
@@ -582,6 +606,67 @@ function doSessionName() {
 function doListForkMessages() {
   closeCmdPalette();
   sendRpc({ type: "get_fork_messages" });
+}
+
+function openSettings() {
+  closeCmdPalette();
+
+  function toggleHtml(id, label, checked) {
+    return `<label class="setting-row">
+      <span class="setting-label">${escapeHtml(label)}</span>
+      <input type="checkbox" id="${id}" ${checked ? "checked" : ""} />
+      <span class="setting-toggle"></span>
+    </label>`;
+  }
+
+  const overlay = showModal(`
+    <h3>⚙ Settings</h3>
+    <div class="settings-list">
+      ${toggleHtml("setting-auto-compact", "Auto-compact", settings.autoCompaction)}
+      ${toggleHtml("setting-show-images", "Show images", settings.showImages)}
+      ${toggleHtml("setting-auto-resize-images", "Auto-resize images", settings.autoResizeImages)}
+      ${toggleHtml("setting-block-images", "Block images", settings.blockImages)}
+      ${toggleHtml("setting-skill-commands", "Skill commands", settings.skillCommands)}
+      <label class="setting-row">
+        <span class="setting-label">Autocomplete max items</span>
+        <input type="number" id="setting-autocomplete-max" value="${settings.autocompleteMaxItems}" min="1" max="50"
+          style="width:60px;padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;text-align:right;" />
+      </label>
+      <label class="setting-row">
+        <span class="setting-label">Steering mode</span>
+        <select id="setting-steer-mode"
+          style="padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;">
+          <option value="one-at-a-time" ${settings.steeringMode === "one-at-a-time" ? "selected" : ""}>One at a time</option>
+          <option value="all" ${settings.steeringMode === "all" ? "selected" : ""}>All</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="cancel" data-cancel="true">Cancel</button>
+      <button data-confirm="true">Save</button>
+    </div>
+  `, () => {});
+
+  overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); };
+  overlay.querySelector("[data-confirm]").onclick = () => {
+    settings.autoCompaction = document.getElementById("setting-auto-compact").checked;
+    settings.showImages = document.getElementById("setting-show-images").checked;
+    settings.autoResizeImages = document.getElementById("setting-auto-resize-images").checked;
+    settings.blockImages = document.getElementById("setting-block-images").checked;
+    settings.skillCommands = document.getElementById("setting-skill-commands").checked;
+    settings.autocompleteMaxItems = parseInt(document.getElementById("setting-autocomplete-max").value) || 5;
+    settings.steeringMode = document.getElementById("setting-steer-mode").value;
+
+    // Send RPC commands for server-side settings
+    sendRpc({ type: "set_auto_compaction", enabled: settings.autoCompaction });
+    sendRpc({ type: "set_steering_mode", mode: settings.steeringMode });
+
+    // Persist local settings
+    saveSettings();
+
+    closeModal();
+    showNotification("Settings saved");
+  };
 }
 
 // ── Notification ──
@@ -932,6 +1017,34 @@ function endThinking() {
 // ── Extension commands storage ──
 let extensionCommands = [];
 
+// ── Settings state ──
+let settings = loadSettings();
+
+function defaultSettings() {
+  return {
+    // Server-side (RPC)
+    autoCompaction: true,
+    steeringMode: "one-at-a-time",
+    // Local (localStorage)
+    showImages: false,
+    autoResizeImages: true,
+    blockImages: false,
+    skillCommands: true,
+    autocompleteMaxItems: 5,
+  };
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("piwab-settings"));
+    return { ...defaultSettings(), ...saved };
+  } catch { return defaultSettings(); }
+}
+
+function saveSettings() {
+  localStorage.setItem("piwab-settings", JSON.stringify(settings));
+}
+
 // ── Event handler ──
 function handleEvent(event) {
   switch (event.type) {
@@ -1104,6 +1217,8 @@ function handleResponse(event) {
         currentThinkingLevel = data.thinkingLevel;
         updateFooterThinking();
       }
+      if (data?.autoCompactionEnabled !== undefined) settings.autoCompaction = data.autoCompactionEnabled;
+      if (data?.steeringMode) settings.steeringMode = data.steeringMode;
       break;
 
     case "get_available_models":

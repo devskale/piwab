@@ -321,6 +321,7 @@ const builtInCommands = [
   { name: "/fork", desc: "Fork from a previous message", action: doFork },
   { name: "/name", desc: "Set session name", action: doSessionName },
   { name: "/sessions", desc: "List fork points", action: doListForkMessages },
+  { name: "/bash", desc: "Run a bash command directly", action: () => { /* handled inline */ } },
   { name: "/new", desc: "New session", action: newSession, shortcut: "↻" },
   { name: "/export", desc: "Export session to HTML", action: doExport },
   { name: "/stats", desc: "Show session statistics", action: doStats },
@@ -406,6 +407,14 @@ function send() {
     if (msg) {
       sendRpc({ type: "follow_up", message: msg });
       showNotification(`Follow-up queued: ${msg.slice(0, 40)}…`);
+    }
+    return;
+  }
+  if (cmd === "/bash") {
+    const bashCmd = text.slice(6).trim(); // strip "/bash "
+    if (bashCmd) {
+      addSystemMessage("bash", `$ ${bashCmd}`);
+      sendRpc({ type: "bash", command: bashCmd });
     }
     return;
   }
@@ -1207,6 +1216,20 @@ function handleResponse(event) {
         showForkPalette(data.messages);
       } else {
         showNotification("No fork points available");
+      }
+      break;
+
+    case "bash":
+      if (event.success && data) {
+        // Show output in a system message or tool card
+        const output = data.output || "";
+        const exitCode = data.exitCode;
+        const truncated = data.truncated;
+        let outputText = output.length > 500 ? output.slice(0, 500) + "…" : output;
+        if (truncated) outputText += "\n(truncated — full output at " + data.fullOutputPath + ")";
+        addSystemMessage("bash", `exit ${exitCode}\n${outputText}`);
+      } else if (!event.success) {
+        addErrorMessage(`bash failed: ${event.error || "unknown"}`);
       }
       break;
   }

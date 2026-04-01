@@ -128,6 +128,24 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
   font-size: 13px;
 }
 
+/* ── System / status messages ── */
+.msg-system {
+  align-self: center; max-width: 80%; text-align: center;
+  padding: 4px 12px; font-size: 11px; color: var(--text-dim);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.msg-system .label { font-weight: 600; color: var(--text); margin-right: 4px; }
+
+/* ── Queue indicator ── */
+#queue-indicator {
+  display: none; align-items: center; gap: 6px;
+  padding: 4px 12px; font-size: 11px; color: var(--accent);
+  background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 12px; margin: 0 auto;
+}
+#queue-indicator.visible { display: inline-flex; }
+
 /* ── Input ── */
 #input-area {
   flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--border);
@@ -204,6 +222,7 @@ button.secondary:hover { background: var(--border); }
     <div id="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
   </header>
   <div id="messages"></div>
+  <div id="queue-indicator"><span id="queue-text">queued: 0</span></div>
   <div id="controls">
     <button class="secondary" id="btn-abort" disabled onclick="abort()">⏹ Abort</button>
     <button class="secondary" id="btn-new" onclick="newSession()">↻ New</button>
@@ -742,6 +761,16 @@ function addErrorMessage(text) {
   scrollToBottom();
 }
 
+// ── System message ──
+function addSystemMessage(label, text) {
+  const div = document.createElement("div");
+  div.className = "msg-system";
+  div.innerHTML = `<span class="label">${escapeHtml(label)}</span>${escapeHtml(text)}`;
+  messagesEl.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
 // ── Thinking ──
 let currentThinkingEl = null;
 let currentThinkingText = "";
@@ -788,6 +817,7 @@ function handleEvent(event) {
       setStatus("connected", "idle");
       endAssistantMessage();
       endThinking();
+      document.getElementById("queue-indicator").classList.remove("visible");
       // Refresh stats after agent finishes
       sendRpc({ type: "get_session_stats" });
       break;
@@ -854,6 +884,69 @@ function handleEvent(event) {
 
     case "extension_error":
       console.error("[extension error]", event.extensionPath, event.error);
+      break;
+
+    // ── Turn events ──
+    case "turn_start":
+      // turn started — no UI action needed
+      break;
+
+    case "turn_end":
+      // turn ended — message and toolResults available if needed
+      break;
+
+    // ── Queue events ──
+    case "queue_update": {
+      const steer = event.steering || [];
+      const follow = event.followUp || [];
+      const total = steer.length + follow.length;
+      const qi = document.getElementById("queue-indicator");
+      const qt = document.getElementById("queue-text");
+      if (total > 0) {
+        const parts = [];
+        if (steer.length) parts.push(`${steer.length} steer`);
+        if (follow.length) parts.push(`${follow.length} follow-up`);
+        qt.textContent = parts.join(" + ");
+        qi.classList.add("visible");
+      } else {
+        qi.classList.remove("visible");
+      }
+      break;
+    }
+
+    // ── Compaction events ──
+    case "compaction_start":
+      addSystemMessage("compacting", `${event.reason || "manual"}…`);
+      break;
+
+    case "compaction_end": {
+      const qi2 = document.getElementById("queue-indicator");
+      // remove the compacting system message (last one)
+      const sysMsgs = messagesEl.querySelectorAll(".msg-system");
+      const last = sysMsgs[sysMsgs.length - 1];
+      if (last?.textContent?.includes("compacting")) last.remove();
+      if (event.aborted) {
+        showNotification("Compaction aborted");
+      } else if (event.result) {
+        showNotification(`Compacted: ${formatTokens(event.result.tokensBefore)} → saved`);
+      }
+      sendRpc({ type: "get_session_stats" });
+      break;
+    }
+
+    // ── Auto-retry events ──
+    case "auto_retry_start":
+      addSystemMessage("retry", `attempt ${event.attempt}/${event.maxAttempts} in ${(event.delayMs / 1000).toFixed(0)}s`);
+      break;
+
+    case "auto_retry_end":
+      // remove retry system message
+      const sysMsgs2 = messagesEl.querySelectorAll(".msg-system");
+      const lastRetry = sysMsgs2[sysMsgs2.length - 1];
+      if (lastRetry?.textContent?.includes("retry")) lastRetry.remove();
+      if (!event.success) {
+        addErrorMessage(`Retry failed after ${event.attempt} attempts: ${event.finalError || "unknown error"}`);
+      }
       break;
   }
 }

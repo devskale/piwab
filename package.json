@@ -7,8 +7,8 @@
     "piwab": "./bridge/index.ts"
   },
   "scripts": {
-    "dev": "npx tsx bridge/index.ts",
-    "start": "npx tsx bridge/index.ts"
+    "dev": "pnpm exec tsx bridge/index.ts",
+    "start": "pnpm exec tsx bridge/index.ts"
   },
   "dependencies": {
     "ws": "^8.20.0"

@@ -229,7 +229,7 @@ button.secondary:hover { background: var(--border); }
   </div>
   <div id="input-area" style="position:relative;">
     <div id="cmd-palette"></div>
-    <textarea id="input" rows="1" placeholder="Message pi… (Enter to send, Shift+Enter for newline, / for commands)" autofocus></textarea>
+    <textarea id="input" rows="1" placeholder="Message pi… (Enter sends, auto-steers while streaming)" autofocus></textarea>
     <button id="btn-send" onclick="send()">Send</button>
   </div>
   <div id="footer">
@@ -278,6 +278,8 @@ const builtInCommands = [
   { name: "/model", desc: "Select a model", action: openModelSelector, shortcut: "click model" },
   { name: "/thinking", desc: "Cycle thinking level", action: cycleThinking, shortcut: "click thinking" },
   { name: "/compact", desc: "Compact conversation context", action: doCompact },
+  { name: "/steer", desc: "Send steering message while agent runs", action: () => { /* handled inline */ } },
+  { name: "/followup", desc: "Queue a follow-up message", action: () => { /* handled inline */ } },
   { name: "/new", desc: "New session", action: newSession, shortcut: "↻" },
   { name: "/export", desc: "Export session to HTML", action: doExport },
   { name: "/stats", desc: "Show session statistics", action: doStats },
@@ -325,6 +327,7 @@ function setStatus(state, label) {
   statusDot.className = state;
   statusText.textContent = label;
   btnAbort.disabled = state !== "streaming";
+  btnSend.textContent = state === "streaming" ? "Steer" : "Send";
 }
 
 // ── Send ──
@@ -338,19 +341,43 @@ function send() {
   // Check if it's a slash command we handle locally
   const cmd = text.split(/\s+/)[0].toLowerCase();
   const localCmd = builtInCommands.find(c => c.name === cmd);
-  if (localCmd && localCmd.action) {
+  if (localCmd && localCmd.action && cmd !== "/steer" && cmd !== "/followup") {
     localCmd.action();
     inputEl.value = "";
     autoResize();
     return;
   }
 
-  addUserMessage(text);
   inputEl.value = "";
   autoResize();
 
-  const rpcCmd = { type: "prompt", message: text };
-  ws.send(JSON.stringify(rpcCmd));
+  // Handle /steer and /followup explicitly
+  if (cmd === "/steer") {
+    const msg = text.slice(6).trim(); // strip "/steer "
+    if (msg) {
+      sendRpc({ type: "steer", message: msg });
+      showNotification(`Steered: ${msg.slice(0, 40)}…`);
+    }
+    return;
+  }
+  if (cmd === "/followup") {
+    const msg = text.slice(10).trim(); // strip "/followup "
+    if (msg) {
+      sendRpc({ type: "follow_up", message: msg });
+      showNotification(`Follow-up queued: ${msg.slice(0, 40)}…`);
+    }
+    return;
+  }
+
+  // If agent is streaming, auto-steer instead of prompting
+  if (isStreaming) {
+    sendRpc({ type: "steer", message: text });
+    showNotification(`Steered: ${text.slice(0, 40)}…`);
+    return;
+  }
+
+  addUserMessage(text);
+  sendRpc({ type: "prompt", message: text });
 }
 
 function abort() {
@@ -810,10 +837,12 @@ function handleEvent(event) {
       break;
 
     case "agent_start":
+      isStreaming = true;
       setStatus("streaming", "thinking…");
       break;
 
     case "agent_end":
+      isStreaming = false;
       setStatus("connected", "idle");
       endAssistantMessage();
       endThinking();
@@ -1030,6 +1059,22 @@ function handleResponse(event) {
     case "export_html":
       if (data?.path) {
         showNotification(`Exported to ${data.path}`);
+      }
+      break;
+
+    case "steer":
+      if (event.success) {
+        // steer accepted — queue_update will show it
+      } else {
+        showNotification(`Steer failed: ${event.error || "unknown"}`, 4000);
+      }
+      break;
+
+    case "follow_up":
+      if (event.success) {
+        // follow-up queued
+      } else {
+        showNotification(`Follow-up failed: ${event.error || "unknown"}`, 4000);
       }
       break;
   }

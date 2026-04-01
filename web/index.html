@@ -146,6 +146,44 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
 }
 #queue-indicator.visible { display: inline-flex; }
 
+/* ── Modal (extension UI dialogs) ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; animation: fadeIn 0.15s;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px; min-width: 340px; max-width: 520px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.modal h3 { font-size: 15px; color: var(--text-bright); margin-bottom: 12px; }
+.modal p { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+.modal select {
+  width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 14px; margin-bottom: 12px; outline: none;
+}
+.modal select:focus { border-color: var(--accent); }
+.modal input[type="text"] {
+  width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 14px; margin-bottom: 12px; outline: none;
+}
+.modal input[type="text"]:focus { border-color: var(--accent); }
+.modal textarea {
+  width: 100%; padding: 8px 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: 13px; min-height: 160px;
+  resize: vertical; margin-bottom: 12px; outline: none;
+}
+.modal textarea:focus { border-color: var(--accent); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-actions button { padding: 8px 16px; font-size: 13px; }
+.modal-actions .cancel { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
+.modal-actions .cancel:hover { background: var(--border); }
+
 /* ── Input ── */
 #input-area {
   flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--border);
@@ -906,9 +944,7 @@ function handleEvent(event) {
       break;
 
     case "extension_ui_request":
-      if (event.method === "notify") {
-        console.log("[extension notify]", event.message);
-      }
+      handleExtensionUiRequest(event);
       break;
 
     case "extension_error":
@@ -1078,6 +1114,157 @@ function handleResponse(event) {
       }
       break;
   }
+}
+
+// ── Extension UI Dialogs ──
+function showModal(html, onResponse) {
+  // Remove any existing modal
+  document.querySelector(".modal-overlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal">${html}</div>`;
+  document.body.appendChild(overlay);
+  // Close on backdrop click
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) onResponse({ cancelled: true });
+  });
+  // Close on Escape
+  const escHandler = (e) => {
+    if (e.key === "Escape") { document.removeEventListener("keydown", escHandler); onResponse({ cancelled: true }); }
+  };
+  document.addEventListener("keydown", escHandler);
+  return overlay;
+}
+
+function closeModal() {
+  document.querySelector(".modal-overlay")?.remove();
+}
+
+function handleExtensionUiRequest(event) {
+  const { id, method } = event;
+
+  switch (method) {
+    case "select": {
+      const options = event.options || [];
+      const opts = options.map((o, i) => `<option value="${i}">${escapeHtml(typeof o === 'string' ? o : o.label || o)}</option>`).join("");
+      const html = `
+        <h3>${escapeHtml(event.title || "Select")}</h3>
+        ${event.timeout ? `<p>Timeout: ${(event.timeout / 1000).toFixed(0)}s</p>` : ""}
+        <select id="modal-select">${opts}</select>
+        <div class="modal-actions">
+          <button class="cancel" onclick="closeModal();sendUiResponse('${id}',null,true)">Cancel</button>
+          <button onclick="const v=document.getElementById('modal-select').value;closeModal();sendUiResponse('${id}',options[${id}='${id}',${options}][v],false)">OK</button>
+        </div>`;
+      // Simplified: use data attributes
+      const overlay = showModal(`
+        <h3>${escapeHtml(event.title || "Select")}</h3>
+        ${event.timeout ? `<p>Timeout: ${(event.timeout / 1000).toFixed(0)}s</p>` : ""}
+        <select id="modal-value">${opts}</select>
+        <div class="modal-actions">
+          <button class="cancel" data-cancel="true">Cancel</button>
+          <button data-confirm="true">OK</button>
+        </div>`, (result) => {
+        if (result.cancelled) {
+          sendUiResponse(id, null, true);
+        }
+      });
+      overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); sendUiResponse(id, null, true); };
+      overlay.querySelector("[data-confirm]").onclick = () => {
+        const idx = parseInt(document.getElementById("modal-value").value);
+        closeModal(); sendUiResponse(id, options[idx], false);
+      };
+      break;
+    }
+
+    case "confirm": {
+      const overlay = showModal(`
+        <h3>${escapeHtml(event.title || "Confirm")}</h3>
+        ${event.message ? `<p>${escapeHtml(event.message)}</p>` : ""}
+        <div class="modal-actions">
+          <button class="cancel" data-cancel="true">No</button>
+          <button data-confirm="true">Yes</button>
+        </div>`, (result) => {
+        if (result.cancelled) sendUiResponse(id, null, true);
+      });
+      overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); sendUiResponse(id, null, true, false); };
+      overlay.querySelector("[data-confirm]").onclick = () => { closeModal(); sendUiResponse(id, null, true, true); };
+      break;
+    }
+
+    case "input": {
+      const overlay = showModal(`
+        <h3>${escapeHtml(event.title || "Input")}</h3>
+        <input type="text" id="modal-value" placeholder="${escapeHtml(event.placeholder || "")}" />
+        <div class="modal-actions">
+          <button class="cancel" data-cancel="true">Cancel</button>
+          <button data-confirm="true">OK</button>
+        </div>`, (result) => {
+        if (result.cancelled) sendUiResponse(id, null, true);
+      });
+      const inp = overlay.querySelector("#modal-value");
+      inp.focus();
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { overlay.querySelector("[data-confirm]").click(); } });
+      overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); sendUiResponse(id, null, true); };
+      overlay.querySelector("[data-confirm]").onclick = () => {
+        closeModal(); sendUiResponse(id, document.getElementById("modal-value").value, false);
+      };
+      break;
+    }
+
+    case "editor": {
+      const overlay = showModal(`
+        <h3>${escapeHtml(event.title || "Edit")}</h3>
+        <textarea id="modal-value">${escapeHtml(event.prefill || "")}</textarea>
+        <div class="modal-actions">
+          <button class="cancel" data-cancel="true">Cancel</button>
+          <button data-confirm="true">OK</button>
+        </div>`, (result) => {
+        if (result.cancelled) sendUiResponse(id, null, true);
+      });
+      overlay.querySelector("#modal-value").focus();
+      overlay.querySelector("[data-cancel]").onclick = () => { closeModal(); sendUiResponse(id, null, true); };
+      overlay.querySelector("[data-confirm]").onclick = () => {
+        closeModal(); sendUiResponse(id, document.getElementById("modal-value").value, false);
+      };
+      break;
+    }
+
+    case "notify":
+      showNotification(event.message || "", event.notifyType === "error" ? 5000 : 3000);
+      break;
+
+    case "setStatus":
+      // Could update a status bar entry — for now just log
+      console.log(`[ext status] ${event.statusKey}: ${event.statusText}`);
+      break;
+
+    case "setTitle":
+      if (event.title) document.title = event.title;
+      break;
+
+    case "set_editor_text":
+      if (event.text) { inputEl.value = event.text; autoResize(); }
+      break;
+
+    case "setWidget":
+      // Widgets not supported in web UI — ignore gracefully
+      break;
+
+    default:
+      console.log(`[ext ui] unhandled method: ${method}`, event);
+  }
+}
+
+function sendUiResponse(id, value, cancelled, confirmed) {
+  const response = { type: "extension_ui_response", id };
+  if (cancelled) {
+    response.cancelled = true;
+  } else if (confirmed !== undefined) {
+    response.confirmed = confirmed;
+  } else {
+    response.value = value;
+  }
+  sendRpc(response);
 }
 
 // ── Utilities ──

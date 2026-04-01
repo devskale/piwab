@@ -7,7 +7,7 @@
     "piwab": "./bridge/index.ts"
   },
   "scripts": {
-    "dev": "pnpm exec tsx bridge/index.ts",
+    "dev": "pnpm exec tsx watch bridge/index.ts",
     "start": "pnpm exec tsx bridge/index.ts"
   },
   "dependencies": {

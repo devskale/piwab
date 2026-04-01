@@ -7,7 +7,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
-import { readFileSync } from "fs";
+import { readFileSync, watchFile } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 
@@ -28,17 +28,57 @@ for (let i = 0; i < args.length; i++) {
 // ---------------------------------------------------------------------------
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const htmlPath = join(__dirname, "..", "web", "index.html");
-let indexHtml: string;
-try {
-  indexHtml = readFileSync(htmlPath, "utf-8");
-} catch {
-  console.error(`❌  web/index.html not found at ${htmlPath}`);
-  process.exit(1);
+
+// Livereload: inject a tiny SSE client into the HTML
+const livereloadScript = `
+<script>
+(function(){
+  var es = new EventSource("/__livereload");
+  es.onmessage = function() { location.reload(); };
+  es.onerror = function() { setTimeout(function(){ es = new EventSource("/__livereload"); }, 1000); };
+})();
+</script>`;
+
+function readIndexHtml(): string {
+  try {
+    const html = readFileSync(htmlPath, "utf-8");
+    return html.replace("</body>", livereloadScript + "\n</body>");
+  } catch {
+    console.error(`❌  web/index.html not found at ${htmlPath}`);
+    process.exit(1);
+  }
 }
 
+// Livereload SSE clients
+const livereloadClients: Set<any> = new Set();
+
+function notifyLivereload() {
+  for (const res of livereloadClients) {
+    res.write("data: reload\n\n");
+  }
+}
+
+// Watch HTML file for changes (poll every 300ms)
+watchFile(htmlPath, { interval: 300 }, () => {
+  console.log("[bridge] web/index.html changed — notifying browser");
+  notifyLivereload();
+});
+
 const httpServer = createServer((req, res) => {
+  if (req.url === "/__livereload") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write("");
+    livereloadClients.add(res);
+    req.on("close", () => livereloadClients.delete(res));
+    return;
+  }
+  // Re-read on every request so edits are always fresh
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(indexHtml);
+  res.end(readIndexHtml());
 });
 
 // ---------------------------------------------------------------------------

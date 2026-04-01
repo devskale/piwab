@@ -83,43 +83,40 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter
 /* ── Tool cards ── */
 .tool-card {
   background: var(--tool-bg); border: 1px solid var(--tool-border);
-  border-radius: var(--radius); overflow: hidden; font-size: 13px;
+  border-radius: 4px; overflow: hidden; font-size: 11px;
 }
 .tool-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; cursor: pointer; user-select: none;
+  padding: 3px 8px; cursor: pointer; user-select: none;
 }
 .tool-header:hover { background: rgba(255,255,255,0.03); }
-.tool-name { font-family: var(--mono); color: var(--accent); font-weight: 500; font-size: 12px; }
-.tool-status { font-size: 11px; color: var(--text-dim); }
+.tool-name { font-family: var(--mono); color: var(--accent); font-weight: 500; font-size: 11px; }
+.tool-status { font-size: 10px; color: var(--text-dim); }
 .tool-status.running { color: var(--accent); }
 .tool-status.error { color: var(--error); }
-.tool-toggle { color: var(--text-dim); font-size: 11px; transition: transform 0.2s; }
+.tool-toggle { color: var(--text-dim); font-size: 9px; transition: transform 0.2s; }
 .tool-toggle.open { transform: rotate(90deg); }
-.tool-args {
-  padding: 0 12px 8px; font-family: var(--mono); font-size: 12px;
-  color: var(--text-dim); white-space: pre-wrap; word-break: break-all;
-}
+.tool-args { display: none; }
 .tool-body {
   border-top: 1px solid var(--tool-border);
-  padding: 10px 12px; font-family: var(--mono); font-size: 12px;
-  max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  color: var(--text); background: rgba(0,0,0,0.2);
+  padding: 4px 8px; font-family: var(--mono); font-size: 11px;
+  max-height: 120px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  color: var(--text-dim); background: rgba(0,0,0,0.15);
   display: none;
 }
 .tool-body.open { display: block; }
 
 /* ── Thinking ── */
 .msg-thinking {
-  padding: 6px 10px; font-size: 12px; color: var(--text-dim);
-  font-style: italic; border-left: 2px solid var(--border); margin: 4px 0;
+  padding: 2px 8px; font-size: 11px; color: var(--text-dim);
+  font-style: italic; border-left: 2px solid var(--border); margin: 2px 0;
   cursor: pointer; user-select: none;
 }
 .msg-thinking:hover { color: var(--text); }
 .thinking-content {
   max-height: 0; overflow: hidden; transition: max-height 0.3s;
 }
-.thinking-content.open { max-height: 2000px; }
+.thinking-content.open { max-height: 300px; }
 
 /* ── Error ── */
 .msg-error-text {
@@ -985,10 +982,7 @@ function updateToolCard(id, partial) {
   if (!body) return;
   const text = partial?.content?.map(c => c.text || "").join("") || "";
   body.textContent = text;
-  if (!body.classList.contains("open")) {
-    body.classList.add("open");
-    document.getElementById(`tool-toggle-${id}`)?.classList.add("open");
-  }
+  // Don't auto-expand — keep collapsed unless user opens it
   scrollToBottom();
 }
 

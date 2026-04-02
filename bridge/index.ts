@@ -7,7 +7,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
-import { readFileSync, watchFile } from "fs";
+import { readFileSync, watchFile, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 
@@ -27,7 +27,11 @@ for (let i = 0; i < args.length; i++) {
 // Serve the single-file web client
 // ---------------------------------------------------------------------------
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const htmlPath = join(__dirname, "..", "web", "index.html");
+// When running via tsx, __dirname is bridge/; when built, it's dist/bridge/
+const webDir = existsSync(join(__dirname, "..", "web"))
+  ? join(__dirname, "..", "web")
+  : join(__dirname, "..", "..", "web");
+const htmlPath = join(webDir, "index.html");
 
 // Livereload: inject a tiny SSE client into the HTML
 const livereloadScript = `
@@ -118,11 +122,20 @@ function spawnPi(): ChildProcess {
     cwd: cwd || process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env },
+    shell: true,
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
     const msg = chunk.toString("utf-8").trim();
     if (msg) console.log(`[pi:stderr] ${msg}`);
+  });
+
+  child.on("error", (err: Error & { code?: string }) => {
+    if (err.code === "ENOENT") {
+      console.error(`❌  "pi" not found in PATH. Install pi first: https://github.com/mariozechner/pi`);
+      process.exit(1);
+    }
+    console.error(`[pi] spawn error: ${err.message}`);
   });
 
   child.on("exit", (code, signal) => {

@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "pnpm exec tsx watch bridge/index.ts",
-    "start": "pnpm exec tsx bridge/index.ts"
+    "build": "tsc",
+    "start": "pnpm exec tsx bridge/index.ts",
+    "start:build": "node dist/bridge/index.js"
   },
   "dependencies": {
     "ws": "^8.20.0"
